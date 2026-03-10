@@ -19,6 +19,7 @@ ComfyUI_XavisUtils/
 │   ├── shake-disconnect.js  # Shake to Disconnect: gesture detection + re-wire logic
 │   ├── wire-knife.js        # Wire Knife: Y+drag cutting with bezier intersection
 │   ├── input-rewire.js      # Input Rewire: drag from input to output
+│   ├── drop-on-wire.js      # Drop on Wire: insert node into existing connection
 │   └── gesture-styles.css   # Shared CSS for gesture features (SVG overlays, animations)
 ```
 
@@ -127,6 +128,18 @@ The rewire handler:
 3. Highlights output slots when the cursor hovers near them
 4. On drop: calls `node.connect(outputSlot, targetNode, inputSlot)` — LiteGraph auto-replaces the old input connection
 5. On drop on empty space: does nothing (old connection preserved)
+
+### Drop on Wire
+
+Passively monitors node drags (same pattern as shake-disconnect — capture phase, no event interception). On each `pointermove` (throttled to 60ms):
+
+1. Checks if the node has moved 20px+ from its start position
+2. Computes the node's bounding box (with 10px padding for tolerance)
+3. Iterates all links in `getCurrentGraph()`, applying an AABB pre-filter to skip distant wires
+4. For surviving candidates: checks type compatibility (`findBestSlotPair` — the node must have both a matching input AND output), then samples 20 points along the bezier curve and tests if any fall inside the node box
+5. If multiple wires match, picks the closest to the node's center
+
+On drop: disconnects the original wire, connects source→node input, connects node output→target. A green flash confirms the insertion.
 
 ## Settings
 

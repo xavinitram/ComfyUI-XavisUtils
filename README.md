@@ -1,6 +1,6 @@
 # Xavi's Utils for ComfyUI
 
-Houdini/Nuke-style UX tools for ComfyUI. Four independently toggleable features that make the node editor feel more like a professional DCC tool.
+Houdini/Nuke-style UX tools for ComfyUI. Five independently toggleable features that make the node editor feel more like a professional DCC tool.
 
 ## Features
 
@@ -57,6 +57,18 @@ Click and drag from a **connected** input slot to create a new wire. Drop on a c
 This makes input and output behaviour symmetrical: dragging from either end creates a new wire rather than picking up the existing one.
 
 **Settings** (Xavi's Utils > Input Rewire):
+
+| Setting | Default |
+|---------|---------|
+| Enable | On |
+
+### Drop Node on Wire
+
+Drag a node onto an existing wire to insert it into the connection. For example, dragging a Resize node (IMAGE in + IMAGE out) onto an IMAGE wire inserts it between the source and target nodes.
+
+The node must have both a compatible input and output for the wire's type. A glowing highlight appears on the wire when a valid insertion is possible, and the matched slots are indicated on the node.
+
+**Settings** (Xavi's Utils > Drop on Wire):
 
 | Setting | Default |
 |---------|---------|
