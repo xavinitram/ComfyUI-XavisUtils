@@ -11,7 +11,8 @@ ComfyUI_XavisUtils/
 ├── __init__.py              # Backend: telemetry handler + REST API
 ├── pyproject.toml           # ComfyUI packaging metadata
 ├── js/
-│   ├── utils.js             # Shared helpers (graph access, hit-testing, coordinate conversion)
+│   ├── utils.js             # Shared helpers (graph access, hit-testing, coordinate conversion,
+│   │                         #   link resolution, bezier math, wire colors, SVG path building)
 │   ├── inspector.js         # Node Inspector: gesture state machine + extension registration
 │   ├── inspector-cache.js   # Inspector: frontend caching layer (object_info, telemetry, output profiles)
 │   ├── inspector-panel.js   # Inspector: DOM rendering (panel content, positioning)
@@ -20,6 +21,10 @@ ComfyUI_XavisUtils/
 │   ├── wire-knife.js        # Wire Knife: Y+drag cutting with bezier intersection
 │   ├── input-rewire.js      # Input Rewire: drag from input to output
 │   ├── drop-on-wire.js      # Drop on Wire: insert node into existing connection
+│   ├── rmb-zoom.js          # RMB Zoom: right-click drag to zoom in/out
+│   ├── tab-search.js        # Tab Search: open search dialog at cursor position
+│   ├── dot-on-wire.js       # Dot on Wire: double-click wire to insert Reroute
+│   ├── dataflow-highlight.js # Dataflow Highlight: upstream/downstream dependency chains
 │   └── gesture-styles.css   # Shared CSS for gesture features (SVG overlays, animations)
 ```
 
@@ -66,6 +71,13 @@ All features import from `utils.js` rather than accessing LiteGraph internals di
 - **`graphPosToScreen(gx, gy)`** — Inverse of the above.
 - **`findSlotUnderCursor(ev, "input"|"output")`** — Hit-tests input or output slots within a 14px radius.
 - **`findNodeUnderCursor(ev)`** — Hit-tests node bodies.
+- **`resolveLink(graph, linkId)`** — Resolves a link ID to a link object, handling all LiteGraph storage formats (Array, Map, Object).
+- **`collectAllLinks(graph)`** — Collects all link objects from the graph, handling sparse arrays, Maps, and Objects.
+- **`evalCubic(p0, p1, p2, p3, t)`** — Evaluates a cubic bezier at parameter t.
+- **`bezierControlPoints(srcPos, dstPos)`** — Computes LiteGraph-style horizontal control points for a wire bezier.
+- **`getWireColor(type)`** — Returns the display colour for a wire type, checking `LiteGraph.registered_slot_out_types` first, then a built-in palette.
+- **`buildWireSVGPath(sx0, sy0, sx1, sy1, reverse?)`** — Builds an SVG path string matching the current wire rendering mode (straight, linear, or spline).
+- **`showInsertFlash(node)`** — Shows a green flash animation over a node (used by drop-on-wire and dot-on-wire).
 
 ### Node Inspector
 
@@ -140,6 +152,56 @@ Passively monitors node drags (same pattern as shake-disconnect — capture phas
 5. If multiple wires match, picks the closest to the node's center
 
 On drop: disconnects the original wire, connects source→node input, connects node output→target. A green flash confirms the insertion.
+
+### RMB Zoom
+
+**State machine**: `IDLE → CANDIDATE (RMB down on empty canvas) → DRAGGING (vertical threshold exceeded)`
+
+Uses a **deferred interception** strategy: `pointerdown` is NOT intercepted (no `stopPropagation()`) so that stationary right-clicks still open the LiteGraph context menu. The gesture only takes over once the mouse moves beyond a 5px vertical dead zone.
+
+**Empty canvas detection**: On `pointerdown`, checks `graph.getNodeOnPos()` and `graph.getGroupOnPos()` to ensure the click is on empty space. If a node or group is under the cursor, the gesture is not started and LiteGraph handles the event normally.
+
+**Zoom math**: `newScale = startScale * Math.exp(deltaY * sensitivity)` where `deltaY = startY - clientY` (moving up = zoom in). The exponential mapping produces perceptually uniform zoom. The zoom is anchored to the initial click position via `app.canvas.setZoom(scale, center)`.
+
+**Context menu suppression**: A `contextmenu` listener in capture phase suppresses the browser/LiteGraph context menu only after a drag occurred. A time-limited flag (`suppressContextMenu`) is set on `pointerup` and cleared after 100ms.
+
+### Tab Search
+
+Intercepts the **Tab** keydown event in capture phase. Before triggering, checks that:
+1. The cursor is inside the graph canvas (`inGraph` via `document.elementFromPoint`)
+2. No modal dialogs, search boxes, or text inputs are focused
+3. No text is selected
+
+Calls `app.canvas.showSearchBox(ev)` to open ComfyUI's built-in search. If the user is currently dragging a wire (`canvas.connecting_output` or `canvas.connecting_input`), the search automatically filters to compatible types.
+
+Mouse position is tracked passively via a `mousemove` listener (stores `lastMouseX`, `lastMouseY`). The graph-canvas check uses `document.elementFromPoint()` at Tab-press time to avoid stale DOM references.
+
+### Dot on Wire
+
+Listens for `dblclick` events. On double-click:
+
+1. Converts cursor position to graph coordinates via `eventToGraphPos()`
+2. Iterates all links via `collectAllLinks()`, applying an **AABB pre-filter** (4 cheap comparisons per wire) before expensive bezier sampling
+3. For surviving candidates, samples 24 points along each wire's bezier curve and computes minimum squared distance to the click point
+4. If the closest wire is within 400px² (20px), creates a Reroute node at the click position
+5. Splits the original connection through the reroute: source → reroute input, reroute output → original target
+
+Falls back through two Reroute node type names: `"Reroute"` then `"RerouteNode"`.
+
+### Dataflow Highlight
+
+Hover over a node to highlight its full upstream and downstream dependency chain.
+
+**Graph traversal**: `collectUpstreamLinks` and `collectDownstreamLinks` recursively walk input/output connections using `resolveLink()` for consistent link resolution across all storage formats. Visited sets prevent infinite loops in cyclic graphs.
+
+**Render loop**: A `requestAnimationFrame` loop runs while a node is highlighted. Optimisations:
+- **Dirty-checking**: Compares `canvas.ds.scale`, `ds.offset[0]`, `ds.offset[1]` against cached values — skips rendering when the canvas transform hasn't changed
+- **Rect caching**: `getBoundingClientRect()` is called once per frame and passed through, avoiding 2N layout thrashes
+- **SVG path pool**: A growable pool of `{ el, lastD, lastCls }` entries caches path strings and class names, only calling `setAttribute` when values change
+
+**Hover detection**: A `pointermove` listener in capture phase uses `graph.getNodeOnPos()` to detect which node is under the cursor. A configurable delay timer (default 200ms) prevents flicker during fast mouse movement. Any `pointerdown` immediately deactivates the highlight to avoid interference with interactions.
+
+**Styling**: Upstream wires use class `xavis-flow-upstream` (blue), downstream use `xavis-flow-downstream` (orange). Both are semi-transparent with a subtle glow filter.
 
 ## Settings
 

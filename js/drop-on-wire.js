@@ -13,6 +13,12 @@ import {
   findNodeUnderCursor,
   getCurrentGraph,
   graphPosToScreen,
+  collectAllLinks,
+  evalCubic,
+  bezierControlPoints,
+  getWireColor,
+  showInsertFlash,
+  buildWireSVGPath,
 } from "./utils.js";
 
 // ---------------------------------------------------------------------------
@@ -41,33 +47,6 @@ let svgOverlay = null;
 let wireHighlight = null; // <path> for highlighted wire
 let inputDot = null;      // <circle> for matched input slot
 let outputDot = null;     // <circle> for matched output slot
-
-// ---------------------------------------------------------------------------
-// Wire color lookup (same palette as input-rewire.js)
-// ---------------------------------------------------------------------------
-const TYPE_COLORS = {
-  IMAGE: "#64b5f6",
-  MASK: "#ffffff",
-  LATENT: "#ff9cf9",
-  MODEL: "#b39ddb",
-  CLIP: "#fdd835",
-  VAE: "#ff6e6e",
-  CONDITIONING: "#ffa931",
-  CONTROL_NET: "#00d78a",
-  INT: "#29699c",
-  FLOAT: "#a1d5a1",
-  STRING: "#8ae68a",
-  "*": "#aaaaaa",
-};
-
-function getWireColor(type) {
-  if (!type) return TYPE_COLORS["*"];
-  try {
-    const c = LiteGraph?.registered_slot_out_types?.[type]?.color;
-    if (c) return c;
-  } catch (_) {}
-  return TYPE_COLORS[type] || TYPE_COLORS["*"];
-}
 
 // ---------------------------------------------------------------------------
 // SVG overlay management
@@ -142,32 +121,8 @@ function findBestSlotPair(node, wireType) {
 }
 
 // ---------------------------------------------------------------------------
-// Bezier math (same formulas as wire-knife.js / LiteGraph)
+// Bezier helpers (use shared evalCubic / bezierControlPoints from utils.js)
 // ---------------------------------------------------------------------------
-
-function evalCubic(p0, p1, p2, p3, t) {
-  const u = 1 - t;
-  const uu = u * u;
-  const uuu = uu * u;
-  const tt = t * t;
-  const ttt = tt * t;
-  return [
-    uuu * p0[0] + 3 * uu * t * p1[0] + 3 * u * tt * p2[0] + ttt * p3[0],
-    uuu * p0[1] + 3 * uu * t * p1[1] + 3 * u * tt * p2[1] + ttt * p3[1],
-  ];
-}
-
-/** Compute LiteGraph bezier control points for a wire. */
-function bezierControlPoints(srcPos, dstPos) {
-  const dx = Math.abs(dstPos[0] - srcPos[0]);
-  const offsetX = Math.max(dx * 0.5, 40);
-  return {
-    cp0: srcPos,
-    cp1: [srcPos[0] + offsetX, srcPos[1]],
-    cp2: [dstPos[0] - offsetX, dstPos[1]],
-    cp3: dstPos,
-  };
-}
 
 /** Loose AABB for a bezier wire (includes control point extent). */
 function bezierAABB(srcPos, dstPos) {
@@ -215,30 +170,6 @@ function bezierDistSqToPoint(srcPos, dstPos, px, py) {
 }
 
 // ---------------------------------------------------------------------------
-// Link collection (handles Array, Map, Object — same as wire-knife.js)
-// ---------------------------------------------------------------------------
-
-function collectAllLinks(graph) {
-  const all = [];
-  if (!graph.links) return all;
-
-  if (graph.links instanceof Map || graph._links instanceof Map) {
-    const map = graph._links || graph.links;
-    map.forEach((link) => { if (link) all.push(link); });
-  } else if (Array.isArray(graph.links)) {
-    for (const link of graph.links) {
-      if (link) all.push(link);
-    }
-  } else {
-    for (const key of Object.keys(graph.links)) {
-      const link = graph.links[key];
-      if (link) all.push(link);
-    }
-  }
-  return all;
-}
-
-// ---------------------------------------------------------------------------
 // Highlight rendering
 // ---------------------------------------------------------------------------
 
@@ -255,10 +186,8 @@ function showHighlight(link, slots, graph) {
   const dstScreen = graphPosToScreen(dstPos[0], dstPos[1]);
   if (!srcScreen || !dstScreen) return;
 
-  // Draw bezier in screen space
-  const dx = Math.abs(dstScreen[0] - srcScreen[0]);
-  const offsetX = Math.max(dx * 0.5, 30);
-  const d = `M ${srcScreen[0]} ${srcScreen[1]} C ${srcScreen[0] + offsetX} ${srcScreen[1]}, ${dstScreen[0] - offsetX} ${dstScreen[1]}, ${dstScreen[0]} ${dstScreen[1]}`;
+  // Build wire path matching the current LiteGraph rendering mode
+  const d = buildWireSVGPath(srcScreen[0], srcScreen[1], dstScreen[0], dstScreen[1]);
 
   const color = getWireColor(link.type);
   wireHighlight.setAttribute("d", d);
@@ -328,36 +257,6 @@ function insertNodeOnWire(node, link, slots, graph) {
   // Step 4: Dirty + feedback
   canvas.setDirty(true, true);
   showInsertFlash(liveNode);
-
-  console.log(
-    `[Xavi's Utils] Drop on Wire: inserted ${liveNode.type || liveNode.comfyClass} #${liveNode.id}` +
-    ` between ${srcNode.type || srcNode.comfyClass}#${srcNode.id}` +
-    ` and ${dstNode.type || dstNode.comfyClass}#${dstNode.id}`
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Visual feedback — green flash on successful insertion
-// ---------------------------------------------------------------------------
-
-function showInsertFlash(node) {
-  const pos = node.pos;
-  const size = node.size;
-  if (!pos || !size) return;
-
-  const topLeft = graphPosToScreen(pos[0], pos[1]);
-  const bottomRight = graphPosToScreen(pos[0] + size[0], pos[1] + size[1]);
-  if (!topLeft || !bottomRight) return;
-
-  const flash = document.createElement("div");
-  flash.className = "xavis-drop-insert-flash";
-  flash.style.left = `${topLeft[0]}px`;
-  flash.style.top = `${topLeft[1]}px`;
-  flash.style.width = `${bottomRight[0] - topLeft[0]}px`;
-  flash.style.height = `${bottomRight[1] - topLeft[1]}px`;
-
-  document.body.appendChild(flash);
-  flash.addEventListener("animationend", () => flash.remove());
 }
 
 // ---------------------------------------------------------------------------
@@ -529,7 +428,5 @@ app.registerExtension({
       clearHighlight();
       resetState();
     }, true);
-
-    console.log("[Xavi's Utils] Drop on Wire loaded.");
   },
 });

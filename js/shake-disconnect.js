@@ -227,11 +227,6 @@ function triggerDisconnect(node) {
   // ----- Step 6: Mark dirty + visual feedback -----
   canvas.setDirty(true, true);
   showShakeFlash(liveNode);
-
-  console.log(
-    `[Xavi's Utils] Shake disconnect: ${liveNode.type || liveNode.comfyClass} #${liveNode.id}` +
-    ` (re-wired ${inputLinks.length} inputs, ${outputLinks.length} outputs)`
-  );
 }
 
 // ---------------------------------------------------------------------------
@@ -325,7 +320,5 @@ app.registerExtension({
     document.addEventListener("pointermove", onPointerMove, true);
     document.addEventListener("pointerup", onPointerUp, true);
     document.addEventListener("pointercancel", onPointerUp, true);
-
-    console.log("[Xavi's Utils] Shake Disconnect loaded.");
   },
 });

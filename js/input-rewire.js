@@ -17,6 +17,8 @@ import {
   eventToGraphPos,
   graphPosToScreen,
   findSlotUnderCursor,
+  getWireColor,
+  buildWireSVGPath,
 } from "./utils.js";
 
 // ---------------------------------------------------------------------------
@@ -39,34 +41,6 @@ let dragOldLinkId = null;  // the existing link ID on this input
 let svgOverlay = null;
 let wirePreview = null;    // <path> element for bezier preview
 let slotHighlight = null;  // <circle> element for output slot highlight
-
-// Wire color from type
-const TYPE_COLORS = {
-  IMAGE: "#64b5f6",
-  MASK: "#ffffff",
-  LATENT: "#ff9cf9",
-  MODEL: "#b39ddb",
-  CLIP: "#fdd835",
-  VAE: "#ff6e6e",
-  CONDITIONING: "#ffa931",
-  CONTROL_NET: "#00d78a",
-  INT: "#29699c",
-  FLOAT: "#a1d5a1",
-  STRING: "#8ae68a",
-  "*": "#aaaaaa",
-};
-
-function getWireColor(type) {
-  if (!type) return TYPE_COLORS["*"];
-
-  // Check LiteGraph's registered type colors first
-  const lgColors = LiteGraph?.registered_slot_out_types;
-  if (lgColors && lgColors[type]?.color) {
-    return lgColors[type].color;
-  }
-
-  return TYPE_COLORS[type] || TYPE_COLORS["*"];
-}
 
 // ---------------------------------------------------------------------------
 // SVG overlay management
@@ -98,15 +72,8 @@ function ensureOverlay() {
 function showWirePreview(fromScreen, toScreen, color) {
   if (!wirePreview) return;
 
-  const dx = Math.abs(toScreen[0] - fromScreen[0]);
-  const offsetX = Math.max(dx * 0.5, 30);
-
-  // Bezier from input (left side) curving to cursor
-  // Input is on the left, so control points go leftward from input, rightward to cursor
-  const cp1x = fromScreen[0] - offsetX;
-  const cp2x = toScreen[0] + offsetX;
-
-  const d = `M ${fromScreen[0]} ${fromScreen[1]} C ${cp1x} ${fromScreen[1]}, ${cp2x} ${toScreen[1]}, ${toScreen[0]} ${toScreen[1]}`;
+  // Build wire path from input slot (left side) curving to cursor
+  const d = buildWireSVGPath(fromScreen[0], fromScreen[1], toScreen[0], toScreen[1], true);
 
   wirePreview.setAttribute("d", d);
   wirePreview.setAttribute("stroke", color);
@@ -216,15 +183,6 @@ function onPointerUp(ev) {
       // Success — the old connection on this input was auto-replaced
       const canvas = app.canvas;
       if (canvas) canvas.setDirty(true, true);
-
-      console.log(
-        `[Xavi's Utils] Input Rewire: connected ${outputHit.node.type || outputHit.node.comfyClass}` +
-        `.${outputHit.slot.name} -> ${dragNode.type || dragNode.comfyClass}` +
-        `.${dragNode.inputs[dragInputIndex].name}`
-      );
-    } else {
-      // Connection failed (type mismatch) — old connection preserved
-      console.log("[Xavi's Utils] Input Rewire: incompatible types, connection unchanged.");
     }
   }
   // If no output hit — do nothing; old connection is preserved.
@@ -294,6 +252,5 @@ app.registerExtension({
     document.addEventListener("pointerup", onPointerUp, true);
     document.addEventListener("pointercancel", onPointerCancel, true);
 
-    console.log("[Xavi's Utils] Input Rewire loaded.");
   },
 });

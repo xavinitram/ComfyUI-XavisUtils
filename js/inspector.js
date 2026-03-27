@@ -575,7 +575,5 @@ app.registerExtension({
         closePinnedPanel();
       }
     });
-
-    console.log("[Xavi's Utils] Node Inspector loaded. Binding:", bindingMode);
   },
 });

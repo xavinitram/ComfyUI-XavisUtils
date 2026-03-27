@@ -8,7 +8,7 @@
  */
 
 import { app } from "../../scripts/app.js";
-import { inGraph, eventToGraphPos, getCurrentGraph, GRAPH_SELECTOR } from "./utils.js";
+import { inGraph, eventToGraphPos, getCurrentGraph, GRAPH_SELECTOR, collectAllLinks, evalCubic, bezierControlPoints } from "./utils.js";
 
 // ---------------------------------------------------------------------------
 // Settings state
@@ -163,10 +163,7 @@ function onPointerUp(ev) {
 
 function finishCut() {
   if (startGraph && endGraph) {
-    const cutCount = cutIntersectingLinks(startGraph, endGraph);
-    if (cutCount > 0) {
-      console.log(`[Xavi's Utils] Wire Knife: cut ${cutCount} wire(s).`);
-    }
+    cutIntersectingLinks(startGraph, endGraph);
   }
 
   // Reset state
@@ -190,25 +187,7 @@ function cutIntersectingLinks(p0, p1) {
   const canvas = app.canvas;
   if (!graph || !canvas) return 0;
 
-  // Collect all link objects
-  const allLinks = [];
-  if (graph.links) {
-    // links can be an array (sparse) or a Map
-    if (graph.links instanceof Map || graph._links instanceof Map) {
-      const map = graph._links || graph.links;
-      map.forEach((link) => { if (link) allLinks.push(link); });
-    } else if (Array.isArray(graph.links)) {
-      for (const link of graph.links) {
-        if (link) allLinks.push(link);
-      }
-    } else {
-      // Object (sparse array-like)
-      for (const key of Object.keys(graph.links)) {
-        const link = graph.links[key];
-        if (link) allLinks.push(link);
-      }
-    }
-  }
+  const allLinks = collectAllLinks(graph);
 
   const linksToRemove = [];
 
@@ -259,15 +238,7 @@ function cutIntersectingLinks(p0, p1) {
  */
 function bezierIntersectsLine(srcPos, dstPos, lineA, lineB) {
   const SAMPLES = 20;
-
-  // Compute control points (same as LiteGraph rendering)
-  const dx = Math.abs(dstPos[0] - srcPos[0]);
-  const offsetX = Math.max(dx * 0.5, 40); // minimum curvature
-
-  const cp0 = srcPos;
-  const cp1 = [srcPos[0] + offsetX, srcPos[1]];
-  const cp2 = [dstPos[0] - offsetX, dstPos[1]];
-  const cp3 = dstPos;
+  const { cp0, cp1, cp2, cp3 } = bezierControlPoints(srcPos, dstPos);
 
   let prevPt = evalCubic(cp0, cp1, cp2, cp3, 0);
 
@@ -283,20 +254,6 @@ function bezierIntersectsLine(srcPos, dstPos, lineA, lineB) {
   }
 
   return false;
-}
-
-/** Evaluate cubic bezier at parameter t. */
-function evalCubic(p0, p1, p2, p3, t) {
-  const u = 1 - t;
-  const uu = u * u;
-  const uuu = uu * u;
-  const tt = t * t;
-  const ttt = tt * t;
-
-  return [
-    uuu * p0[0] + 3 * uu * t * p1[0] + 3 * u * tt * p2[0] + ttt * p3[0],
-    uuu * p0[1] + 3 * uu * t * p1[1] + 3 * u * tt * p2[1] + ttt * p3[1],
-  ];
 }
 
 /**
@@ -368,7 +325,5 @@ app.registerExtension({
     document.addEventListener("pointercancel", () => {
       if (knifeState === "CUTTING") finishCut();
     }, true);
-
-    console.log("[Xavi's Utils] Wire Knife loaded.");
   },
 });
